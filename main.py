@@ -75,6 +75,7 @@ import base64
 import json
 import math
 import os
+import sys
 import zlib
 
 NDIGITS = 6
@@ -259,25 +260,56 @@ def renormalise(fans, last):
 
 # --- io --------------------------------------------------------------------
 
+DEFAULT_HORIZON = 240
+
+
+def horizon_of(case):
+    """The case's own horizon, with zero meaning zero.
+
+    `int(case.get(k) or 240)` reads a horizon of 0 as a missing horizon and
+    forecasts 240 minutes instead — a whole case answered against the wrong
+    question, with nothing in the output to say so.
+    """
+    value = case.get('horizon_minutes')
+    if value is None:
+        return DEFAULT_HORIZON
+    return max(0, int(value))
+
+
 def run(indir, outdir):
-    """Forecast every *.in case of indir into outdir, in name order."""
+    """Forecast every *.in case of indir into outdir, in name order.
+
+    Each case stands alone: one unreadable file must not take the rest of the
+    batch with it, so a bad case is reported on stderr and skipped, and the
+    cases after it are still written.
+    """
     os.makedirs(outdir, exist_ok=True)
+    skipped = []
     for name in sorted(os.listdir(indir)):
         if not name.endswith('.in'):
             continue
-        with open(os.path.join(indir, name), 'r') as fh:
-            case = json.load(fh)
-        hmax = int(case.get('horizon_minutes') or 240)
-        markets = case.get('markets') or []
-        fans = forecast_case(markets, hmax)
-        forecasts = [{'id': m['id'], 'q': fan} for m, fan in zip(markets, fans)]
+        try:
+            with open(os.path.join(indir, name), 'r') as fh:
+                case = json.load(fh)
+            if not isinstance(case, dict):
+                raise ValueError('case is not an object')
+            hmax = horizon_of(case)
+            markets = case.get('markets') or []
+            fans = forecast_case(markets, hmax)
+        except Exception as exc:
+            skipped.append((name, exc))
+            print(f'warning: skipped {name}: {type(exc).__name__}: {exc}', file=sys.stderr)
+            continue
+        forecasts = [{'id': m.get('id') if isinstance(m, dict) else None, 'q': fan}
+                     for m, fan in zip(markets, fans)]
         with open(os.path.join(outdir, name[:-3] + '.out'), 'w') as fh:
             json.dump({'forecasts': forecasts}, fh, separators=(',', ':'))
+    return skipped
 
 
 def main():
-    run(os.environ.get('MAKEFUN_INPUT_DIR', '/input'),
-        os.environ.get('MAKEFUN_OUTPUT_DIR', '/output'))
+    run(os.environ.get('MAKEFUN_INPUT_DIR') or '/input',
+        os.environ.get('MAKEFUN_OUTPUT_DIR') or '/output')
 
 
 if __name__ == '__main__':

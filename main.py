@@ -206,6 +206,11 @@ def forecast_case(markets, hmax):
     else:
         level = 0.5 * (ordered[n // 2 - 1] + ordered[n // 2])
 
+    # A case whose every market sat still for the whole window has a median
+    # volatility of exactly zero, and the ratio below would divide by it: the
+    # whole case then raises instead of producing a fan. Floor the level.
+    level = level if level > 1e-9 else 1e-9
+
     fans = []
     for L, price, vol in zip(hist, last, vols):
         v = vol if vol > 1e-9 else 1e-9

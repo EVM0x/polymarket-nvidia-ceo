@@ -140,6 +140,30 @@ class RunTest(Base):
         self.run_quiet()
         self.assertEqual(len(self.out(self.outdir + "/a.out")["forecasts"]), 5)
 
+    def test_a_market_with_a_hole_in_its_grid_does_not_lose_the_case(self):
+        # A 1-minute grid can arrive with a missing minute as null. `float(None)`
+        # inside forecast_case used to raise, the case was caught by run(), and an
+        # event of three candidates produced no output at all: the two readable
+        # markets were answered with nothing.
+        def grid(start):
+            return [round(start + 0.001 * (i % 5), 6) for i in range(400)]
+
+        self.put("a.in", {
+            "horizon_minutes": 5,
+            "markets": [
+                {"id": "nvidia-other", "prices": grid(0.10)},
+                {"id": "jensen-huang", "prices": [0.4, 0.41, None] + grid(0.4)[3:]},
+                {"id": "lisa-su", "prices": grid(0.30)},
+            ],
+        })
+        skipped, err = self.run_quiet()
+        self.assertEqual(skipped, [], "the whole case was skipped instead of one market")
+        body = self.out("a.out")
+        self.assertEqual([f["id"] for f in body["forecasts"]], ["nvidia-other", "lisa-su"])
+        for forecast in body["forecasts"]:
+            self.assertEqual(len(forecast["q"]), 5)
+        self.assertIn("jensen-huang", err, "the dropped market was not reported anywhere")
+
 
 class MainTest(unittest.TestCase):
     def capture_main(self, env):

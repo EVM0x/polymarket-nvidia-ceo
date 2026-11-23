@@ -276,12 +276,40 @@ def horizon_of(case):
     return max(0, int(value))
 
 
+def usable_markets(markets):
+    """The markets of a case whose prices can be read, in case order.
+
+    A case is one event, and one market of it can carry a hole in its grid -- a
+    missing minute arrives as null.  `forecast_case` used to meet that as
+    `float(None)`, raise, and take the whole case down with it: an event of
+    twelve candidates where one name had a gap produced no output at all, so the
+    eleven readable markets were answered with nothing.  A market that cannot be
+    read is reported on stderr and left out; the rest of the case is still
+    answered.
+    """
+    good = []
+    for index, m in enumerate(markets):
+        if not isinstance(m, dict):
+            print(f'warning: market {index} is not an object: skipped', file=sys.stderr)
+            continue
+        try:
+            for p in (m.get('prices') or []):
+                float(p)
+        except (TypeError, ValueError):
+            print(f'warning: market {index} ({m.get("id")!r}) has unreadable prices: skipped',
+                  file=sys.stderr)
+            continue
+        good.append(m)
+    return good
+
+
 def run(indir, outdir):
     """Forecast every *.in case of indir into outdir, in name order.
 
     Each case stands alone: one unreadable file must not take the rest of the
     batch with it, so a bad case is reported on stderr and skipped, and the
-    cases after it are still written.
+    cases after it are still written.  Within a case, one unreadable market must
+    not take the other markets with it either -- see `usable_markets`.
     """
     os.makedirs(outdir, exist_ok=True)
     skipped = []
@@ -294,7 +322,7 @@ def run(indir, outdir):
             if not isinstance(case, dict):
                 raise ValueError('case is not an object')
             hmax = horizon_of(case)
-            markets = case.get('markets') or []
+            markets = usable_markets(case.get('markets') or [])
             fans = forecast_case(markets, hmax)
         except Exception as exc:
             skipped.append((name, exc))
